@@ -314,6 +314,19 @@ if [ -n "$SAVED_DOMAIN" ] && [ "$DOMAIN" != "$SAVED_DOMAIN" ] && [ -d "/home/cer
     print_success "Old SSL certificates backed up to: $BACKUP_DIR"
 fi
 
+# Fix permissions for Docker volumes
+print_info "Fixing Docker volumes permissions..."
+
+if [ -d "/home/redis-data" ]; then
+    chown -R 999:1000 /home/redis-data
+fi
+
+if [ -d "/home/certbot" ]; then
+    chown -R 1000:1000 /home/certbot
+fi
+
+print_success "Docker volumes permissions fixed"
+
 # Start Docker services
 cd /home || exit 1
 docker compose up -d --build --remove-orphans --force-recreate > /dev/null 2>&1
