@@ -1,0 +1,68 @@
+services:
+  redis:
+    image: redis:alpine
+    container_name: redis
+    restart: always
+    command: redis-server --appendonly yes --save "" --maxmemory 1024mb --maxmemory-policy allkeys-lru --appendfsync no
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+    volumes:
+      - ./redis-data:/data
+    networks:
+      reverse_proxy:
+        ipv4_address: 172.18.0.7
+    logging:
+      driver: "none"
+
+  mosdns-x:
+    image: bibica/mosdns-x:mod-latest
+    container_name: mosdns-x
+    restart: always
+    environment:
+      - TZ=Asia/Ho_Chi_Minh 
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "443:443/tcp"
+      - "443:443/udp"
+      - "853:853/tcp"
+      - "853:853/udp"
+    volumes:
+      - ./mosdns-x/config:/home/mosdns-x/config
+      - ./mosdns-x/log:/home/mosdns-x/log
+      - ./mosdns-x/rules:/home/mosdns-x/rules
+      - ./mosdns-x/key:/home/mosdns-x/key
+      - ./certbot:/home/mosdns-x/ssl:ro
+    networks:
+      reverse_proxy:
+        ipv4_address: 172.18.0.6
+    logging:
+      driver: "none"
+
+  certbot:
+    image: bibica/certbot-cron:latest
+    container_name: certbot
+    environment:
+      - EMAIL=${CERTBOT_EMAIL}
+      - DOMAINS=${CERTBOT_DOMAINS}
+      - PLUGIN=cloudflare
+      - CLOUDFLARE_TOKEN=${CLOUDFLARE_API_TOKEN}
+      - TZ=Asia/Ho_Chi_Minh
+      - ONE_SHOT=true
+      - GENERATE_DHPARAM=false
+    volumes:
+      - ./certbot:/config
+    networks:
+      reverse_proxy:
+        ipv4_address: 172.18.0.8
+    logging:
+      driver: "none"
+
+networks:
+  reverse_proxy:
+    driver: bridge
+    name: reverse_proxy
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.18.0.0/16
