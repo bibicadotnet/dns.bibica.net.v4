@@ -67,6 +67,15 @@ load_saved_token() {
     fi
 }
 
+load_saved_domain() {
+    if [ -f "$ENV_FILE" ]; then
+        local domain=$(grep "^CERTBOT_DOMAINS=" "$ENV_FILE" | cut -d'=' -f2)
+        if [ -n "$domain" ]; then
+            echo "$domain"
+        fi
+    fi
+}
+
 save_token() {
     local token=$1
     if [ -f "$ENV_FILE" ]; then
@@ -102,9 +111,7 @@ update_env_file() {
     local domain=$1
     local email=$2
     local token=$3
-    
-    print_info "Updating .env file..."
-    
+
     sed -i "s|^CLOUDFLARE_API_TOKEN=.*|CLOUDFLARE_API_TOKEN=$token|g" "$ENV_FILE"
     sed -i "s|^CERTBOT_EMAIL=.*|CERTBOT_EMAIL=$email|g" "$ENV_FILE"
     sed -i "s|^CERTBOT_DOMAINS=.*|CERTBOT_DOMAINS=$domain|g" "$ENV_FILE"
@@ -112,7 +119,6 @@ update_env_file() {
     chmod 600 "$ENV_FILE"
     chown root:root "$ENV_FILE"
     
-    print_success ".env file updated successfully"
 }
 
 remove_existing_cron() {
@@ -147,17 +153,42 @@ print_centered "with Certbot & Persistent Redis"
 print_separator
 echo ""
 
-# Get domain
-while true; do
-    read -p "Enter the domain you want to use (e.g., dns.bibica.net): " DOMAIN
+# Get domain with saved domain detection
+SAVED_DOMAIN=$(load_saved_domain)
+DOMAIN=""
+
+if [ -n "$SAVED_DOMAIN" ]; then
+    print_info "Found saved domain: $SAVED_DOMAIN"
     
-    if validate_domain "$DOMAIN"; then
-        print_success "Valid domain: $DOMAIN"
-        break
-    else
-        print_error "Invalid domain. Please try again."
-    fi
-done
+    while true; do
+        read -p "Do you want to use the saved domain? (Y/n): " USE_SAVED_DOMAIN
+        USE_SAVED_DOMAIN=${USE_SAVED_DOMAIN:-Y}
+        
+        if [[ "$USE_SAVED_DOMAIN" =~ ^[Yy]$ ]]; then
+            DOMAIN="$SAVED_DOMAIN"
+            print_success "Using saved domain: $DOMAIN"
+            break
+        elif [[ "$USE_SAVED_DOMAIN" =~ ^[Nn]$ ]]; then
+            break
+        else
+            print_error "Invalid input. Please enter Y or N."
+        fi
+    done
+fi
+
+if [ -z "$DOMAIN" ]; then
+    echo ""
+    while true; do
+        read -p "Enter the domain you want to use (e.g., dns.bibica.net): " DOMAIN
+        
+        if validate_domain "$DOMAIN"; then
+            print_success "Valid domain: $DOMAIN"
+            break
+        else
+            print_error "Invalid domain. Please try again."
+        fi
+    done
+fi
 
 # Auto-generate email from domain
 EMAIL="admin@$DOMAIN"
@@ -175,23 +206,30 @@ API_TOKEN=""
 
 if [ -n "$SAVED_TOKEN" ]; then
     print_info "Found saved Cloudflare API Token."
-    read -p "Do you want to use the saved token? (Y/n): " USE_SAVED
-    USE_SAVED=${USE_SAVED:-Y}
     
-    if [[ "$USE_SAVED" =~ ^[Yy]$ ]]; then
-        if verify_cloudflare_token "$SAVED_TOKEN"; then
-            API_TOKEN="$SAVED_TOKEN"
-            print_success "Using saved API Token."
+    while true; do
+        read -p "Do you want to use the saved token? (Y/n): " USE_SAVED
+        USE_SAVED=${USE_SAVED:-Y}
+        
+        if [[ "$USE_SAVED" =~ ^[Yy]$ ]]; then
+            if verify_cloudflare_token "$SAVED_TOKEN"; then
+                API_TOKEN="$SAVED_TOKEN"
+                print_success "Using saved API Token."
+                break
+            else
+                print_error "Saved token is invalid or inactive. Please enter a new one."
+                break
+            fi
+        elif [[ "$USE_SAVED" =~ ^[Nn]$ ]]; then
+            break
         else
-            print_error "Saved token is invalid or inactive. Please enter a new one."
-            SAVED_TOKEN=""
+            print_error "Invalid input. Please enter Y or N."
         fi
-    else
-        SAVED_TOKEN=""
-    fi
+    done
 fi
 
 if [ -z "$API_TOKEN" ]; then
+    echo ""
     echo "If you don't have an API Token yet, follow these steps:"
     echo ""
     echo "  1. Access: https://dash.cloudflare.com/profile/api-tokens"
@@ -225,18 +263,15 @@ echo ""
 
 # Install Docker if not present
 if ! command -v docker &> /dev/null; then
-    print_info "Installing Docker..."
     curl -fsSL https://get.docker.com -o get-docker.sh > /dev/null 2>&1
     sh get-docker.sh > /dev/null 2>&1
     rm get-docker.sh
     systemctl enable docker > /dev/null 2>&1
     systemctl start docker > /dev/null 2>&1
-    print_success "Docker installed successfully"
 fi
 
 # Download project
 cd /home || exit 1
-print_info "Downloading Mosdns-x PR project..."
 
 curl -L https://github.com/bibicadotnet/dns.bibica.net.v4/archive/HEAD.tar.gz 2>/dev/null \
 | tar xz --strip-components=1 \
@@ -248,8 +283,6 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-print_success "Project downloaded successfully"
-
 # Create or update .env file
 if [ -f "$ENV_FILE" ]; then
     update_env_file "$DOMAIN" "$EMAIL" "$API_TOKEN"
@@ -258,11 +291,8 @@ else
 fi
 
 # Configure mosdns-x config
-print_info "Configuring Mosdns-x..."
-
 if [ -f /home/mosdns-x/config/config.yaml ]; then
     sed -i "s/dns\.bibica\.net/$DOMAIN/g" /home/mosdns-x/config/config.yaml
-    print_success "Mosdns-x configuration updated"
 else
     print_error "Mosdns-x config file not found"
     exit 1
@@ -274,11 +304,17 @@ REDIS_MEMORY_MB=$((TOTAL_RAM_MB / 2))
 
 if [ -f /home/compose.yml ]; then
     sed -i "s/--maxmemory [0-9]*mb/--maxmemory ${REDIS_MEMORY_MB}mb/g" /home/compose.yml
-    print_success "Redis memory configured to ${REDIS_MEMORY_MB}MB"
+fi
+
+# Backup old SSL certificates if domain changed
+if [ -n "$SAVED_DOMAIN" ] && [ "$DOMAIN" != "$SAVED_DOMAIN" ] && [ -d "/home/certbot/letsencrypt/live/$SAVED_DOMAIN" ]; then
+    BACKUP_DIR="/home/certbot/backup-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$BACKUP_DIR"
+    cp -r /home/certbot/letsencrypt/live/$SAVED_DOMAIN "$BACKUP_DIR/"
+    print_success "Old SSL certificates backed up to: $BACKUP_DIR"
 fi
 
 # Start Docker services
-print_info "Starting Docker services..."
 cd /home || exit 1
 docker compose up -d --build --remove-orphans --force-recreate > /dev/null 2>&1
 
@@ -287,16 +323,14 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-print_success "Docker services started successfully"
-
 # Setup ad-blocking cron if script exists
 if [ -f /home/setup-cron-mosdns-block-allow.sh ]; then
     /home/setup-cron-mosdns-block-allow.sh > /dev/null 2>&1
-    print_success "Ad-blocking cron job configured"
 fi
 
 # Add certbot renewal cron job
-add_certbot_cron
+remove_existing_cron > /dev/null 2>&1
+(crontab -l 2>/dev/null; echo "0 3 * * * docker start certbot") | crontab - > /dev/null 2>&1
 
 # Wait for SSL certificates
 CERT_PATH="/home/certbot/letsencrypt/live/$DOMAIN"
@@ -351,7 +385,7 @@ cat << EOF
   DNS-over-QUIC (DoQ):       quic://$DOMAIN
 
   SSL Certificates:          /home/certbot/letsencrypt/live/$DOMAIN/
-  Redis Cache:               ${REDIS_MEMORY_MB}MB
+  Redis Max Memory Limit:    ${REDIS_MEMORY_MB} MB
 
   Ad-blocking:               Updates daily at 2:00 AM via cron
   SSL-renewal:               Updates daily at 3:00 AM via cron
