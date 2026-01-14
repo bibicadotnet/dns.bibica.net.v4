@@ -4,9 +4,6 @@ localhost
 test
 invalid
 example
-example.com
-example.net
-example.org
 
 # RFC 9476 - .alt TLD for non-DNS names
 alt
@@ -61,5 +58,9 @@ full:mktxp
 full:apm_cc
 full:karakeep-chrome
 full:https://app-measurement.com/sdk-exp
-full:netmon-control.dropbox.com
-full:_5222._https.web.whatsapp.com
+full:privacy
+full:apiisgp.ezvizlife.com\(null\)
+full:smartblock.firefox.etp
+full:https://ynuf.aliapp.org/saveWb.json?
+full:apiisgp.ezvizlife.com\(null\)
+full:*google.com
