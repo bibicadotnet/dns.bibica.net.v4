@@ -42,6 +42,10 @@ data_providers:
     file: "rules/private_tlds.txt"
     auto_reload: true
 
+  - tag: provider_valid_tlds
+    file: "rules/valid_tlds.txt"
+    auto_reload: true
+
 # ============================================================================
 # PLUGINS CONFIGURATION - Functional Modules & Matchers
 # ============================================================================
@@ -72,18 +76,24 @@ plugins:
     args:
       qtype: [28] # AAAA record
 
-# ----- Domain Format Validator -----
+  # ----- Domain Format Validator -----
   - tag: match_invalid_domain_format
     type: query_matcher
     args:
       domain:
-        # Match any domain containing characters that are NOT allowed
-        # Allowed chars: a-z, A-Z, 0-9, dot (.), underscore (_), hyphen (-)
-        # This blocks: http://, (null), spaces, and symbols like & * ^ % $ # @ !
+        # Block domains with illegal characters (space, %, $, #, @, etc.)
         - "regexp:[^a-zA-Z0-9._-]"
         
-        # Match single label domains (no dots) e.g., 'mktxp', 'localhost'
+        # Block single-label domains without a dot (e.g., localhost)
         - "regexp:^[^.]+$"
+
+  # Check if the domain TLD exists in the IANA official list
+  - tag: match_valid_tld
+    type: query_matcher
+    args:
+      domain:
+        - "provider:provider_valid_tlds"
+
   # ----- ECS Handler -----
   - tag: ecs_handler
     type: ecs
@@ -236,7 +246,7 @@ plugins:
 
         # --- Block Invalid Domain Format ---
         # Return NXDOMAIN immediately for malformed or garbage domains
-        - if: match_invalid_domain_format
+        - if: "match_invalid_domain_format || !match_valid_tld"
           exec:
             - _new_nxdomain_response
             - _return
