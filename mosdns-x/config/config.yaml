@@ -7,7 +7,7 @@
 # LOGGING CONFIGURATION - System Events & Error Tracking
 # ============================================================================
 log:
-  level: error # Options: debug, info, error, warn
+  level: info # Options: debug, info, error, warn
   file: "log/mosdns.log"
 
 # ============================================================================
@@ -72,6 +72,18 @@ plugins:
     args:
       qtype: [28] # AAAA record
 
+# ----- Domain Format Validator -----
+  - tag: match_invalid_domain_format
+    type: query_matcher
+    args:
+      domain:
+        # Match any domain containing characters that are NOT allowed
+        # Allowed chars: a-z, A-Z, 0-9, dot (.), underscore (_), hyphen (-)
+        # This blocks: http://, (null), spaces, and symbols like & * ^ % $ # @ !
+        - "regexp:[^a-zA-Z0-9._-]"
+        
+        # Match single label domains (no dots) e.g., 'mktxp', 'localhost'
+        - "regexp:^[^.]+$"
   # ----- ECS Handler -----
   - tag: ecs_handler
     type: ecs
@@ -222,6 +234,13 @@ plugins:
         # ANY queries are deprecated and often used in DNS amplification attacks
         - _reject_any
 
+        # --- Block Invalid Domain Format ---
+        # Return NXDOMAIN immediately for malformed or garbage domains
+        - if: match_invalid_domain_format
+          exec:
+            - _new_nxdomain_response
+            - _return
+
         # --- Block IPv6 Queries (AAAA) ---
         # Prefer IPv4 by returning empty responses for IPv6 lookups
         - if: query_is_ipv6
@@ -280,7 +299,7 @@ plugins:
 
         # --- Logging ---
         # Generate summary for non-blocked requests
-        #- _query_summary
+        - _query_summary
 
         # --- Route Google Domains ---
         # Forward to Google DNS with ECS support and TTL adjustment (not localhost)
