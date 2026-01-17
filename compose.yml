@@ -3,7 +3,7 @@ services:
     image: redis:alpine
     container_name: redis
     restart: always
-    command: redis-server --appendonly yes --save "" --maxmemory 1024mb --maxmemory-policy allkeys-lru --appendfsync no
+    command: redis-server --appendonly yes --save "" --maxmemory 987mb --maxmemory-policy allkeys-lru --appendfsync no
     environment:
       - TZ=Asia/Ho_Chi_Minh
     volumes:
